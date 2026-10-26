@@ -14,6 +14,7 @@ import shlex
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
@@ -549,10 +550,21 @@ def optional_image_text(path: Path) -> str:
         vision_script = Path(__file__).with_name("vision_ocr.swift")
         if not swift or not vision_script.is_file():
             return ""
-        command = [swift, str(vision_script), str(path)]
+        module_cache = Path(tempfile.gettempdir()) / "ghost-data-still-exists-swift-module-cache"
+        module_cache.mkdir(parents=True, exist_ok=True)
+        command = [
+            swift,
+            "-module-cache-path",
+            str(module_cache),
+            str(vision_script),
+            str(path),
+        ]
     result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
-        raise RuntimeError(f"OCR failed for {path}: {result.stderr.strip()}")
+        raise RuntimeError(
+            f"OCR failed for {path}: {result.stderr.strip()} "
+            "On macOS, install Tesseract or use a Swift toolchain compatible with the installed SDK."
+        )
     return result.stdout
 
 
