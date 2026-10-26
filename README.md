@@ -39,6 +39,20 @@ python3 code/main.py
 
 The blank template at `dataset/output.csv` is provided as a reference. Your final generated file for submission must be the root-level `output.csv`.
 
+### Current implementation
+
+The implementation in `code/main.py` is a deterministic, standard-library Python pipeline. It reads the participant-facing identity history, activity, policy, evidence manifest, and evidence files, applies each request's `audit_at` cutoff, and writes root-level `output.csv`. Supported evidence readers include JSON, SQLite-compatible SQL, structured and key-value logs, text, and extractable PDF text. Image evidence is not OCR-scanned when Tesseract is unavailable.
+
+From the repository root:
+
+```bash
+python3 code/main.py
+python3 -m unittest discover -s code/evaluation -p 'test_*.py'
+python3 code/evaluation/main.py
+```
+
+The evaluator checks output shape and compares a generated public-sample run with `dataset/sample_output.csv`. See [`code/evaluation/evaluation_report.md`](./code/evaluation/evaluation_report.md) for measured results and known gaps. This solution makes no external model calls; its heuristic results are imperfect, so review the report before treating the generated predictions as verified.
+
 
 ## Dataset
 
