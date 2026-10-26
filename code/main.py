@@ -95,6 +95,11 @@ def parse_time(value: str | None) -> dt.datetime | None:
     text = value.strip()
     if not text:
         return None
+    text = re.sub(
+        r"^(\d{4})[:\-]\s*(\d{2})[-:]\s*(\d{2})(?=T)",
+        r"\1-\2-\3",
+        text,
+    )
     try:
         parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
@@ -719,7 +724,13 @@ def subject_identifiers(
         event_time = parse_time(row.get("event_time"))
         if event_time is None or event_time > audit_at:
             continue
-        if row.get("field_name", "").casefold() in {"email", "email_hash", "phone"}:
+        if row.get("field_name", "").casefold() in {
+            "email",
+            "email_hash",
+            "phone",
+            "name",
+            "full_name",
+        }:
             values.update((row.get("old_value", ""), row.get("new_value", "")))
     return {str(value).strip() for value in values if value and str(value).strip()}
 
@@ -730,7 +741,15 @@ def evidence_matches(record: Evidence, user_id: str, identifiers: set[str]) -> b
     id_fields = {
         normalized(value)
         for key, value in values
-        if key in {"user_id", "customer_reference", "subject_reference", "subject_ref", "user_reference", "customer_id"}
+        if key in {
+            "user_id",
+            "customer_reference",
+            "subject_reference",
+            "subject_ref",
+            "user_reference",
+            "customer_id",
+            "correlation_key",
+        }
         and value is not None
     }
     if normalized(user_id) in id_fields:
@@ -840,6 +859,10 @@ def finding_for(record: Evidence, state: str) -> tuple[str, str] | None:
         return None
     if category == "ACCOUNT_TOMBSTONE":
         return ("REPORT_EXPOSED_PII", "PRESENT") if state in {"PRESENT", "ACTIVE"} and has_direct_identifiers(record.fields) else None
+    if str(record.fields.get("event") or "").casefold() == "contact_lookup_completed":
+        rows = str(record.fields.get("rows", ""))
+        if rows.isdigit() and int(rows) > 0:
+            return "REPORT_REMAINING_RECORD", "PRESENT"
     if state in {"ABSENT", "ANONYMIZED", "REDACTED", "DISABLED", "BLOCKED"}:
         return None
     if category in {"ANALYTICS_PROFILE", "PRODUCT_TELEMETRY"}:
@@ -860,6 +883,15 @@ def remediation_for(
         return "DISABLE_DATA_FLOW", "DISABLED"
     if finding == "REPORT_RESTORE_RISK":
         return "BLOCK_RESTORE", "BLOCKED"
+    event = str(record.fields.get("event") or "").casefold()
+    if event == "deletion_marker_check" and str(
+        record.fields.get("marker_found", "")
+    ).casefold() == "false":
+        return "DELETE_RECORD", "ABSENT"
+    if event in {"contact_query_completed", "contact_lookup_completed"}:
+        rows = str(record.fields.get("rows", ""))
+        if rows.isdigit() and int(rows) > 0:
+            return "DELETE_RECORD", "ABSENT"
     action = policy.get(record.category)
     policy_operations = {
         "DELETE": ("DELETE_RECORD", "ABSENT"),
@@ -1123,6 +1155,11 @@ def build_case(
                 steps.append(
                     step("VERIFICATION", record.system_id, record.resource_id, verify_op, verify_state, "")
                 )
+        for check in current_verifications:
+            key = (check["system_id"], check["resource_id"])
+            if key not in verified_resources:
+                steps.append({**check, "evidence_id": ""})
+                verified_resources.add(key)
         for record in account_evidence:
             key = (record.system_id, record.resource_id)
             if not account_present and key not in verified_resources:

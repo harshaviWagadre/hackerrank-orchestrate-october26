@@ -48,10 +48,10 @@ From the repository root:
 ```bash
 python3 code/main.py
 python3 -m unittest discover -s code/evaluation -p 'test_*.py'
-python3 code/evaluation/main.py
+python3 code/evaluation/main.py --differential-report code/evaluation/sample_differential.md
 ```
 
-The evaluator checks output shape and compares a generated public-sample run with `dataset/sample_output.csv`. See [`code/evaluation/evaluation_report.md`](./code/evaluation/evaluation_report.md) for measured results and known gaps. This solution makes no external model calls; its heuristic results are imperfect, so review the report before treating the generated predictions as verified.
+The evaluator validates output structure, evidence references, and operation ordering, then compares every generated public-sample row with `dataset/sample_output.csv`. It can write per-case, per-field differences and diagnostic categories to `code/evaluation/sample_differential.md`. See [`code/evaluation/evaluation_report.md`](./code/evaluation/evaluation_report.md) for measured results and known gaps. This solution makes no external model calls; its heuristic results are imperfect, so review the report before treating the generated predictions as verified.
 
 
 ## Dataset

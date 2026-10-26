@@ -8,6 +8,7 @@ import csv
 import json
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,23 @@ STEP_FIELDS = {
     "operation",
     "state",
     "evidence_id",
+}
+STEP_CONTRACT = {
+    "REPORT_REMAINING_RECORD": ("FINDING", "PRESENT"),
+    "REPORT_EXPOSED_PII": ("FINDING", "PRESENT"),
+    "REPORT_ACTIVE_DATA_FLOW": ("FINDING", "ACTIVE"),
+    "REPORT_RESTORE_RISK": ("FINDING", "ACTIVE"),
+    "DISABLE_DATA_FLOW": ("REMEDIATION", "DISABLED"),
+    "BLOCK_RESTORE": ("REMEDIATION", "BLOCKED"),
+    "DELETE_RECORD": ("REMEDIATION", "ABSENT"),
+    "REDACT_RECORD": ("REMEDIATION", "REDACTED"),
+    "ANONYMIZE_RECORD": ("REMEDIATION", "ANONYMIZED"),
+    "VERIFY_RECORD_ABSENT": ("VERIFICATION", "ABSENT"),
+    "VERIFY_RECORD_PRESENT": ("VERIFICATION", "PRESENT"),
+    "VERIFY_RECORD_REDACTED": ("VERIFICATION", "REDACTED"),
+    "VERIFY_RECORD_ANONYMIZED": ("VERIFICATION", "ANONYMIZED"),
+    "VERIFY_DATA_FLOW_DISABLED": ("VERIFICATION", "DISABLED"),
+    "VERIFY_RESTORE_BLOCKED": ("VERIFICATION", "BLOCKED"),
 }
 
 
@@ -49,12 +67,20 @@ def parse_steps(row: dict[str, str]) -> list[dict[str, Any]]:
             raise ValueError(f"{row.get('case_id', '<unknown>')}: step {number} has invalid order")
         if step["operation"] not in audit.OPERATION_ORDER:
             raise ValueError(f"{row.get('case_id', '<unknown>')}: step {number} has invalid operation")
+        if (step["phase"], step["state"]) != STEP_CONTRACT[step["operation"]]:
+            raise ValueError(
+                f"{row.get('case_id', '<unknown>')}: step {number} violates operation/state contract"
+            )
         if not all(isinstance(step[key], str) for key in STEP_FIELDS - {"step_no"}):
             raise ValueError(f"{row.get('case_id', '<unknown>')}: step {number} has invalid value types")
     return steps
 
 
-def validate_output(requests: list[dict[str, str]], output: list[dict[str, str]]) -> None:
+def validate_output(
+    requests: list[dict[str, str]],
+    output: list[dict[str, str]],
+    allowed_evidence_ids: set[str],
+) -> None:
     expected_ids = sorted(row["case_id"] for row in requests)
     output_ids = [row["case_id"] for row in output]
     if output_ids != expected_ids:
@@ -69,9 +95,36 @@ def validate_output(requests: list[dict[str, str]], output: list[dict[str, str]]
             step["phase"] != "VERIFICATION" for step in steps
         ):
             raise ValueError(f"{row['case_id']}: COMPLETE may contain only verification steps")
+        if row["deletion_status"] == "COMPLETE" and any(
+            not step["evidence_id"] for step in steps
+        ):
+            raise ValueError(f"{row['case_id']}: COMPLETE verification must cite evidence")
+        if row["deletion_status"] == "INCOMPLETE":
+            for step in steps:
+                future_step = step["phase"] in {"REMEDIATION", "VERIFICATION"}
+                if future_step and step["evidence_id"]:
+                    raise ValueError(
+                        f"{row['case_id']}: proposed/future step must have empty evidence_id"
+                    )
+                if step["phase"] == "FINDING" and step["evidence_id"] not in allowed_evidence_ids:
+                    raise ValueError(f"{row['case_id']}: finding cites unknown evidence")
+        for step in steps:
+            if step["evidence_id"] and step["evidence_id"] not in allowed_evidence_ids:
+                raise ValueError(f"{row['case_id']}: step cites unknown evidence")
         phase_indexes = [audit.PHASE_ORDER[step["phase"]] for step in steps]
         if phase_indexes != sorted(phase_indexes):
             raise ValueError(f"{row['case_id']}: phases are not ordered")
+        ordering_keys = [
+            (
+                audit.PHASE_ORDER[step["phase"]],
+                audit.OPERATION_ORDER[step["operation"]],
+                step["system_id"],
+                step["resource_id"],
+            )
+            for step in steps
+        ]
+        if ordering_keys != sorted(ordering_keys):
+            raise ValueError(f"{row['case_id']}: steps violate operation/system/resource order")
 
 
 def score_samples(
@@ -96,11 +149,31 @@ def score_samples(
         exact_sequences += expected_steps == actual_steps
         expected_step_count += len(expected_steps)
         expected_fields += len(expected_steps) * len(STEP_FIELDS)
-        for expected_step, actual_step in zip(expected_steps, actual_steps):
-            matched_steps += expected_step == actual_step
+        unmatched_actual = set(range(len(actual_steps)))
+        for expected_step in expected_steps:
+            candidates = [
+                index
+                for index in unmatched_actual
+                if actual_steps[index]["system_id"] == expected_step["system_id"]
+                and actual_steps[index]["resource_id"] == expected_step["resource_id"]
+            ]
+            if not candidates:
+                continue
+            actual_index = min(
+                candidates,
+                key=lambda index: (
+                    actual_steps[index]["operation"] != expected_step["operation"],
+                    actual_steps[index]["phase"] != expected_step["phase"],
+                    actual_steps[index]["state"] != expected_step["state"],
+                    index,
+                ),
+            )
+            unmatched_actual.remove(actual_index)
+            actual_step = actual_steps[actual_index]
             matched_fields += sum(
                 expected_step[field] == actual_step[field] for field in STEP_FIELDS
             )
+            matched_steps += expected_step == actual_step
     return {
         "cases": len(comparable_ids),
         "status_correct": status_correct,
@@ -112,27 +185,204 @@ def score_samples(
     }
 
 
+def render_step(step: dict[str, Any]) -> str:
+    return (
+        f"{step['phase']} {step['system_id']}/{step['resource_id']} "
+        f"{step['operation']}={step['state']} evidence={step['evidence_id']!r}"
+    )
+
+
+def write_differential(
+    expected: list[dict[str, str]],
+    actual: list[dict[str, str]],
+    path: Path,
+    parsed_resource_ids: set[str],
+) -> None:
+    expected_by_id = {row["case_id"]: row for row in expected}
+    actual_by_id = {row["case_id"]: row for row in actual}
+    lines = [
+        "# Public Sample Differential",
+        "",
+        "Expected rows are from the official public `sample_output.csv`; actual rows are",
+        "generated by the current audit pipeline. Steps are aligned by system and resource.",
+        "The listed root-cause categories are diagnostic signals, not claims that the",
+        "underlying participant evidence is sufficient to resolve every mismatch.",
+        "",
+    ]
+    categories: Counter[str] = Counter()
+    for case_id in sorted(expected_by_id.keys() | actual_by_id.keys()):
+        expected_row = expected_by_id.get(case_id)
+        actual_row = actual_by_id.get(case_id)
+        if expected_row is None or actual_row is None:
+            categories["identity resolution / missing case row"] += 1
+            lines.extend(
+                [f"## {case_id}", "", "Missing expected or actual case row.", ""]
+            )
+            continue
+        expected_steps = parse_steps(expected_row)
+        actual_steps = parse_steps(actual_row)
+        if expected_row["deletion_status"] == actual_row["deletion_status"] and expected_steps == actual_steps:
+            continue
+        lines.extend(
+            [
+                f"## {case_id}",
+                "",
+                f"- Status: expected `{expected_row['deletion_status']}`, actual `{actual_row['deletion_status']}`.",
+                f"- Step count: expected {len(expected_steps)}, actual {len(actual_steps)}.",
+            ]
+        )
+        root_causes: set[str] = set()
+        unmatched_actual = set(range(len(actual_steps)))
+        aligned: list[tuple[int, int]] = []
+        for expected_index, expected_step in enumerate(expected_steps):
+            candidates = [
+                index
+                for index in unmatched_actual
+                if actual_steps[index]["system_id"] == expected_step["system_id"]
+                and actual_steps[index]["resource_id"] == expected_step["resource_id"]
+            ]
+            if candidates:
+                actual_index = min(
+                    candidates,
+                    key=lambda index: (
+                        actual_steps[index]["operation"] != expected_step["operation"],
+                        actual_steps[index]["phase"] != expected_step["phase"],
+                        actual_steps[index]["state"] != expected_step["state"],
+                        actual_steps[index]["evidence_id"] != expected_step["evidence_id"],
+                        index,
+                    ),
+                )
+                unmatched_actual.remove(actual_index)
+                aligned.append((expected_index, actual_index))
+                actual_step = actual_steps[actual_index]
+                changed = [
+                    field
+                    for field in ("phase", "system_id", "resource_id", "operation", "state", "evidence_id")
+                    if expected_step[field] != actual_step[field]
+                ]
+                if changed:
+                    lines.append(
+                        f"- Expected step {expected_index + 1}, actual step {actual_index + 1}: "
+                        f"expected `{render_step(expected_step)}`; actual `{render_step(actual_step)}`."
+                    )
+                    lines.append("  Changed fields: " + ", ".join(changed) + ".")
+                if "operation" in changed:
+                    root_causes.add("deletion policy / operation selection")
+                if "state" in changed:
+                    root_causes.add("audit-time reconstruction / evidence interpretation")
+                if "evidence_id" in changed:
+                    root_causes.add("evidence references / provenance")
+                if "phase" in changed:
+                    root_causes.add("phase ordering")
+            else:
+                root_causes.add("missing steps")
+                if expected_step["operation"] == "VERIFY_RECORD_PRESENT":
+                    root_causes.add("retained records")
+                if expected_step["operation"] in {
+                    "REPORT_ACTIVE_DATA_FLOW",
+                    "DISABLE_DATA_FLOW",
+                    "VERIFY_DATA_FLOW_DISABLED",
+                }:
+                    root_causes.add("active data flows")
+                if expected_step["operation"] in {
+                    "REPORT_RESTORE_RISK",
+                    "BLOCK_RESTORE",
+                    "VERIFY_RESTORE_BLOCKED",
+                }:
+                    root_causes.add("restore risks")
+                if expected_step["system_id"] == "account_service":
+                    root_causes.add("identity resolution / account evidence linkage")
+                else:
+                    root_causes.add("evidence extraction/linkage")
+                lines.append(
+                    f"- Expected step {expected_index + 1}: expected "
+                    f"`{render_step(expected_step)}`; actual `<no matching system/resource step>`."
+                )
+        for actual_index in sorted(unmatched_actual):
+            root_causes.add("extra steps")
+            lines.append(
+                f"- Actual step {actual_index + 1}: unexpected "
+                f"`{render_step(actual_steps[actual_index])}`."
+            )
+        actual_order = [actual_index for _, actual_index in aligned]
+        if actual_order != sorted(actual_order):
+            root_causes.add("sequence ordering")
+            lines.append("- Matched steps appear in a different sequence order.")
+        categories.update(root_causes)
+        lines.extend(
+            ["- Diagnostic categories: " + ", ".join(sorted(root_causes)) + ".", ""]
+        )
+        lines.append("")
+    lines.extend(["## Aggregate Diagnostic Categories", ""])
+    for category, count in sorted(categories.items()):
+        lines.append(f"- {category}: {count} case-level differences.")
+    expected_resource_ids = {
+        step["resource_id"]
+        for row in expected
+        for step in parse_steps(row)
+    }
+    unextracted_ids = sorted(expected_resource_ids - parsed_resource_ids)
+    lines.extend(
+        [
+            "",
+            "## Resource Identifiers Not Extracted from Participant Evidence",
+            "",
+            "This is a diagnostic inventory only. The identifiers below occur in the",
+            "public sample oracle but were not emitted by the current evidence readers;",
+            "they were not used to generate predictions.",
+            "",
+        ]
+    )
+    if unextracted_ids:
+        lines.extend(f"- `{resource_id}`" for resource_id in unextracted_ids)
+    else:
+        lines.append("- None.")
+    lines.append("")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=ROOT / "dataset")
     parser.add_argument("--output", type=Path, default=ROOT / "output.csv")
+    parser.add_argument("--differential-report", type=Path, default=None)
     args = parser.parse_args()
 
     requests = read_rows(args.dataset / "deletion_requests.csv")
     output = read_rows(args.output)
     if not output or list(output[0].keys()) != ["case_id", "deletion_status", "steps_json"]:
         raise ValueError("Output columns do not match the required schema")
-    validate_output(requests, output)
+    manifest_ids = {
+        row["file_id"] for row in read_rows(args.dataset / "evidence_files.csv")
+    }
+    activity_ids = {
+        row["activity_id"] for row in read_rows(args.dataset / "system_activity.csv")
+    }
+    audit_ids = {
+        row["audit_id"] for row in read_rows(args.dataset / "user_audit_log.csv")
+    }
+    validate_output(requests, output, manifest_ids | activity_ids | audit_ids)
     print(f"Full-output validation: PASS ({len(output)} rows)")
 
     with tempfile.TemporaryDirectory(prefix="deletion-audit-evaluation-") as temp_dir:
         sample_actual_path = Path(temp_dir) / "sample_output.csv"
         sample_requests = args.dataset / "sample_deletion_requests.csv"
         audit.run(args.dataset, sample_requests, sample_actual_path)
-        metrics = score_samples(
-            read_rows(args.dataset / "sample_output.csv"),
-            read_rows(sample_actual_path),
-        )
+        expected_samples = read_rows(args.dataset / "sample_output.csv")
+        actual_samples = read_rows(sample_actual_path)
+        metrics = score_samples(expected_samples, actual_samples)
+        if args.differential_report:
+            parsed_resource_ids = {
+                record.resource_id for record in audit.load_evidence(args.dataset)
+            }
+            write_differential(
+                expected_samples,
+                actual_samples,
+                args.differential_report,
+                parsed_resource_ids,
+            )
+            print(f"Detailed differential report: {args.differential_report}")
     count = metrics["cases"]
     print(f"Public sample cases: {count}")
     print(
