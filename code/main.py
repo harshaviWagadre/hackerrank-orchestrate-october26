@@ -692,6 +692,40 @@ def identity_index(dataset: Path) -> tuple[dict[str, dict[str, Any]], dict[str, 
     return users, aliases
 
 
+def identity_candidates(
+    email: str,
+    audit_at: dt.datetime,
+    users: dict[str, dict[str, Any]],
+    aliases: dict[str, set[str]],
+    history: list[dict[str, str]],
+) -> set[str]:
+    target = normalized(email)
+    candidates: set[str] = set()
+    for user_id in aliases.get(target, set()):
+        user = users.get(user_id, {})
+        current_email = normalized(user.get("email", ""))
+        updated_at = parse_time(user.get("updated_at"))
+        if current_email == target and updated_at and updated_at <= audit_at:
+            candidates.add(user_id)
+            continue
+        for row in history:
+            if row.get("user_id") != user_id or row.get("field_name", "").casefold() != "email":
+                continue
+            event_time = parse_time(row.get("event_time"))
+            if (
+                event_time
+                and event_time <= audit_at
+                and target
+                in {
+                    normalized(row.get("old_value", "")),
+                    normalized(row.get("new_value", "")),
+                }
+            ):
+                candidates.add(user_id)
+                break
+    return candidates
+
+
 def load_policy(dataset: Path) -> dict[str, str]:
     policy: dict[str, str] = {}
     for row in read_csv(dataset / "deletion_rules.csv"):
@@ -1002,7 +1036,9 @@ def build_case(
     audit_at = parse_time(request["audit_at"])
     if audit_at is None:
         raise ValueError(f"Invalid audit_at for {request.get('case_id')}: {request.get('audit_at')}")
-    candidate_ids = aliases.get(normalized(request.get("email", "")), set())
+    candidate_ids = identity_candidates(
+        request.get("email", ""), audit_at, users, aliases, history
+    )
     if len(candidate_ids) != 1:
         return "INCOMPLETE", []
     user_id = next(iter(candidate_ids))
@@ -1057,7 +1093,9 @@ def build_case(
     account_records = [record for record in matching if record.category == "USER_PROFILE"]
     account_id = next((record.resource_id for record in account_records), "")
     if not account_records:
-        linked_activities: list[tuple[float, str]] = []
+        reported_at = parse_time(request.get("reported_at"))
+        directly_linked_resources: set[str] = set()
+        time_correlated_resources: set[str] = set()
         for activity in activities:
             if (
                 activity.get("event_type") != "DELETE_RECORD"
@@ -1084,10 +1122,14 @@ def build_case(
                 )
                 for identifier in linked_identifiers
             ):
-                linked_activities.append((0.0, resource_id))
-        unique_resources = {resource_id for _, resource_id in linked_activities}
-        if len(unique_resources) == 1:
-            account_id = next(iter(unique_resources))
+                directly_linked_resources.add(resource_id)
+            elif reported_at:
+                distance = abs((event_time - reported_at).total_seconds())
+                if distance <= 600:
+                    time_correlated_resources.add(resource_id)
+        candidate_resources = directly_linked_resources or time_correlated_resources
+        if len(candidate_resources) == 1:
+            account_id = next(iter(candidate_resources))
 
     if account_id and not account_records:
         snapshots = [
