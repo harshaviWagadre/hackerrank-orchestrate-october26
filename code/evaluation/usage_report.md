@@ -1,10 +1,12 @@
 # Model Usage Report
 
-The full-dataset run that produced root-level `output.csv` processed 518 requests using the local deterministic Python pipeline.
+## Full-Dataset Run
+
+The final deterministic Python pipeline processed all 518 requests from `dataset/deletion_requests.csv` and wrote the candidate CSV to `/private/tmp/ghost-final-output.csv`. The candidate passed full-output validation before being promoted to root `output.csv`.
 
 | Provider / model | Model calls | Input tokens | Output tokens | Total tokens | Estimated inference cost |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| None (no model invoked) | 0 | 0 | 0 | 0 | $0.00 |
+| None (local deterministic pipeline; no model invoked) | 0 | 0 | 0 | 0 | $0.00 |
 | **Overall** | **0** | **0** | **0** | **0** | **$0.00** |
 
 - Requests processed: 518
@@ -13,4 +15,4 @@ The full-dataset run that produced root-level `output.csv` processed 518 request
 - Estimated total inference cost: $0.00
 - Estimated inference cost per request: $0.00
 
-Token and cost values are zero because this run made no model-provider calls; local CPU and storage costs are not estimated.
+The implementation made no model-provider calls, so token usage and inference cost are zero. Local CPU, OCR, and storage costs were not measured and are not estimated here.

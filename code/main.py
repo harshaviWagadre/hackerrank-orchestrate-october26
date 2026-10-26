@@ -60,6 +60,16 @@ DIRECT_IDENTIFIER_KEYS = {
     "match_key",
     "subject_key",
 }
+RESOURCE_REFERENCE_KEYS = {"source_resource_id", "account_resource_id"}
+IDENTITY_REFERENCE_KEYS = {
+    "user_id",
+    "customer_reference",
+    "subject_reference",
+    "subject_ref",
+    "user_reference",
+    "customer_id",
+    "correlation_key",
+}
 EMPTY_IDENTIFIER_VALUES = {
     "",
     "null",
@@ -826,6 +836,58 @@ def evidence_matches(record: Evidence, user_id: str, identifiers: set[str]) -> b
     return False
 
 
+def account_resource_references(record: Evidence) -> set[str]:
+    return {
+        str(value).strip()
+        for key, value in flatten_values(record.fields)
+        if key in RESOURCE_REFERENCE_KEYS
+        and isinstance(value, str)
+        and re.fullmatch(r"account_[A-Za-z0-9_-]+", value.strip())
+    }
+
+
+def account_resource_targets(record: Evidence) -> set[str]:
+    targets = account_resource_references(record)
+    if re.fullmatch(r"account_[A-Za-z0-9_-]+", record.resource_id):
+        targets.add(record.resource_id)
+    return targets
+
+
+def fields_conflict_with_identity(
+    fields: dict[str, Any],
+    user_id: str,
+    identity_owners: dict[str, set[str]],
+) -> bool:
+    for key, value in flatten_values(fields):
+        if key not in DIRECT_IDENTIFIER_KEYS | IDENTITY_REFERENCE_KEYS or value is None:
+            continue
+        candidate = normalized(value)
+        owners = identity_owners.get(candidate, set())
+        if owners and user_id not in owners:
+            return True
+        if key in IDENTITY_REFERENCE_KEYS and re.fullmatch(r"user_\d+", candidate):
+            if candidate != normalized(user_id):
+                return True
+    return False
+
+
+def activity_conflicts_with_identity(
+    details: str,
+    user_id: str,
+    aliases: dict[str, set[str]],
+) -> bool:
+    if any(
+        normalized(candidate) != normalized(user_id)
+        for candidate in re.findall(r"(?i)\buser_\d+\b", details)
+    ):
+        return True
+    for email in re.findall(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", details):
+        owners = aliases.get(normalized(email), set())
+        if owners and user_id not in owners:
+            return True
+    return False
+
+
 def evidence_at_cutoff(record: Evidence, audit_at: dt.datetime, manifest: dict[str, str]) -> bool:
     capture = parse_time(manifest.get(record.evidence_id))
     observation = parse_time(record.observed_at)
@@ -1045,13 +1107,24 @@ def build_case(
     identifiers = subject_identifiers(
         user_id, request.get("email", ""), audit_at, users[user_id], history
     )
-    matching = [
+    identity_owners: dict[str, set[str]] = {}
+    for known_user_id, known_user in users.items():
+        for identifier in subject_identifiers(
+            known_user_id, "", audit_at, known_user, history
+        ):
+            identity_owners.setdefault(normalized(identifier), set()).add(known_user_id)
+    eligible_evidence = [
         record
         for record in evidence
         if record.category != "ACCOUNT_SNAPSHOT"
         and evidence_at_cutoff(record, audit_at, manifest_times)
-        and evidence_matches(record, user_id, identifiers)
     ]
+    matching = [
+        record
+        for record in eligible_evidence
+        if evidence_matches(record, user_id, identifiers)
+    ]
+    identity_linked_records = matching.copy()
     correlated_hashes = {
         normalized(value)
         for value in identifiers
@@ -1093,9 +1166,11 @@ def build_case(
     account_records = [record for record in matching if record.category == "USER_PROFILE"]
     account_id = next((record.resource_id for record in account_records), "")
     if not account_records:
-        reported_at = parse_time(request.get("reported_at"))
-        directly_linked_resources: set[str] = set()
-        time_correlated_resources: set[str] = set()
+        candidate_resources = {
+            resource_id
+            for record in identity_linked_records
+            for resource_id in account_resource_references(record)
+        }
         for activity in activities:
             if (
                 activity.get("event_type") != "DELETE_RECORD"
@@ -1122,12 +1197,26 @@ def build_case(
                 )
                 for identifier in linked_identifiers
             ):
-                directly_linked_resources.add(resource_id)
-            elif reported_at:
-                distance = abs((event_time - reported_at).total_seconds())
-                if distance <= 600:
-                    time_correlated_resources.add(resource_id)
-        candidate_resources = directly_linked_resources or time_correlated_resources
+                candidate_resources.add(resource_id)
+
+        conflicting_resources = {
+            resource_id
+            for record in eligible_evidence
+            if fields_conflict_with_identity(record.fields, user_id, identity_owners)
+            for resource_id in account_resource_targets(record)
+        }
+        conflicting_resources.update(
+            activity.get("resource_id", "")
+            for activity in activities
+            if activity.get("target_system") == "account_service"
+            and activity.get("resource_id", "") in candidate_resources
+            and parse_time(activity.get("event_time")) is not None
+            and parse_time(activity.get("event_time")) <= audit_at
+            and activity_conflicts_with_identity(
+                activity.get("details", ""), user_id, aliases
+            )
+        )
+        candidate_resources.difference_update(conflicting_resources)
         if len(candidate_resources) == 1:
             account_id = next(iter(candidate_resources))
 

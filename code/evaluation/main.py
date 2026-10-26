@@ -471,6 +471,11 @@ def main() -> int:
         if args.differential_report:
             parsed_evidence = audit.load_evidence(args.dataset)
             parsed_resource_ids = {record.resource_id for record in parsed_evidence}
+            parsed_resource_ids.update(
+                resource_id
+                for record in parsed_evidence
+                for resource_id in audit.account_resource_references(record)
+            )
             manifest_times = {
                 row["file_id"]: row["captured_at"]
                 for row in read_rows(args.dataset / "evidence_files.csv")
