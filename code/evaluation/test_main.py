@@ -62,6 +62,32 @@ class DeletionIntentTests(unittest.TestCase):
 
 
 class EvidenceAndOrderingTests(unittest.TestCase):
+    def test_document_ocr_normalizes_spaced_resource_ids_and_subjects(self) -> None:
+        records = main.document_evidence(
+            "Subject filter: user 03; audit record 003, Account closure recorded.",
+            Path("security_audit_explorer.png"),
+            "evidence_ocr",
+            "2026-09-05T07:00:00Z",
+        )
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].resource_id, "audit_record_003")
+        self.assertEqual(records[0].category, "SECURITY_AUDIT_LOG")
+        self.assertEqual(records[0].fields["subject_reference"], "user_03")
+
+    def test_document_ocr_recognizes_marketing_profile_resources(self) -> None:
+        records = main.document_evidence(
+            "marketing_001 sj.park@naver.com Live",
+            Path("marketing_profile_console.png"),
+            "evidence_marketing",
+            "2026-09-16T07:20:00Z",
+        )
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].resource_id, "marketing_001")
+        self.assertEqual(records[0].system_id, "marketing_platform")
+        self.assertEqual(records[0].category, "MARKETING_PROFILE")
+
     def test_remediation_uses_the_loaded_policy_action(self) -> None:
         rules = main.load_policy(Path(__file__).resolve().parents[2] / "dataset")
         analytics = main.Evidence(
@@ -279,6 +305,149 @@ class EvidenceAndOrderingTests(unittest.TestCase):
                 ("FINDING", "REPORT_EXPOSED_PII", "a"),
                 ("VERIFICATION", "VERIFY_RECORD_ABSENT", "a"),
             ],
+        )
+
+    def test_incomplete_case_verifies_each_absent_account_copy(self) -> None:
+        observed_at = "2026-01-01T12:00:00Z"
+        evidence = [
+            main.Evidence(
+                "account_service",
+                "account_present",
+                "USER_PROFILE",
+                "PRESENT",
+                "profile_present",
+                observed_at,
+                {"user_id": "user_1"},
+                "",
+            ),
+            main.Evidence(
+                "account_service",
+                "account_absent",
+                "USER_PROFILE",
+                "ABSENT",
+                "profile_absent",
+                observed_at,
+                {"user_id": "user_1"},
+                "",
+            ),
+            main.Evidence(
+                "search_service",
+                "search_1",
+                "SEARCH_INDEX_ENTRY",
+                "PRESENT",
+                "search_present",
+                observed_at,
+                {"user_id": "user_1"},
+                "",
+            ),
+        ]
+        status, steps = main.build_case(
+            {
+                "case_id": "case_test",
+                "email": "user@example.test",
+                "audit_at": "2026-01-02T00:00:00Z",
+                "reported_at": "",
+                "request_text": "Please delete my account.",
+            },
+            {"user_1": {"updated_at": observed_at}},
+            {"user@example.test": {"user_1"}},
+            [],
+            evidence,
+            {item.evidence_id: observed_at for item in evidence},
+            [],
+            {"USER_PROFILE": "DELETE", "SEARCH_INDEX_ENTRY": "DELETE"},
+        )
+
+        self.assertEqual(status, "INCOMPLETE")
+        self.assertIn(
+            ("account_absent", "VERIFY_RECORD_ABSENT", "ABSENT", ""),
+            [
+                (item["resource_id"], item["operation"], item["state"], item["evidence_id"])
+                for item in steps
+            ],
+        )
+
+    def test_report_time_does_not_link_an_unrelated_account_activity(self) -> None:
+        snapshot = main.Evidence(
+            "account_service",
+            "__account_snapshot__",
+            "ACCOUNT_SNAPSHOT",
+            "UNKNOWN",
+            "snapshot_evidence",
+            "2026-01-01T12:00:00Z",
+            {"resource_ids": []},
+            "",
+        )
+        activity = {
+            "event_type": "DELETE_RECORD",
+            "source_system": "deletion_worker",
+            "target_system": "account_service",
+            "resource_id": "account_123",
+            "event_time": "2026-01-01T12:00:00Z",
+            "details": "Deletion worker submitted primary profile account_123.",
+        }
+
+        status, steps = main.build_case(
+            {
+                "case_id": "case_test",
+                "email": "user@example.test",
+                "audit_at": "2026-01-02T00:00:00Z",
+                "reported_at": "2026-01-01T12:00:00Z",
+                "request_text": "Please delete my account.",
+            },
+            {"user_1": {"updated_at": "2026-01-01T00:00:00Z"}},
+            {"user@example.test": {"user_1"}},
+            [],
+            [snapshot],
+            {"snapshot_evidence": "2026-01-01T12:00:00Z"},
+            [activity],
+            {},
+        )
+
+        self.assertEqual((status, steps), ("INCOMPLETE", []))
+
+    def test_account_activity_with_exact_subject_reference_can_be_linked(self) -> None:
+        snapshot = main.Evidence(
+            "account_service",
+            "__account_snapshot__",
+            "ACCOUNT_SNAPSHOT",
+            "UNKNOWN",
+            "snapshot_evidence",
+            "2026-01-01T12:00:00Z",
+            {"resource_ids": []},
+            "",
+        )
+        activity = {
+            "event_type": "DELETE_RECORD",
+            "source_system": "deletion_worker",
+            "target_system": "account_service",
+            "resource_id": "account_123",
+            "event_time": "2026-01-01T12:00:00Z",
+            "details": "Deletion worker submitted account_123 for user_1.",
+            "reported_result": "SUCCESS",
+        }
+
+        status, steps = main.build_case(
+            {
+                "case_id": "case_test",
+                "email": "user@example.test",
+                "audit_at": "2026-01-02T00:00:00Z",
+                "reported_at": "",
+                "request_text": "Please delete my account.",
+            },
+            {"user_1": {"updated_at": "2026-01-01T00:00:00Z"}},
+            {"user@example.test": {"user_1"}},
+            [],
+            [snapshot],
+            {"snapshot_evidence": "2026-01-01T12:00:00Z"},
+            [activity],
+            {},
+        )
+
+        self.assertEqual(status, "COMPLETE")
+        self.assertEqual(
+            [(item["resource_id"], item["operation"], item["evidence_id"]) for item in steps],
+            [("account_123", "VERIFY_RECORD_ABSENT", "snapshot_evidence")],
         )
 
 

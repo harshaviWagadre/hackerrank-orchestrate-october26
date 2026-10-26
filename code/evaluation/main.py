@@ -192,14 +192,94 @@ def render_step(step: dict[str, Any]) -> str:
     )
 
 
+def missing_step_source(
+    step: dict[str, Any],
+    request: dict[str, str],
+    evidence: list[audit.Evidence],
+    manifest_times: dict[str, str],
+    activities: list[dict[str, str]],
+    users: dict[str, dict[str, Any]],
+    aliases: dict[str, set[str]],
+    history: list[dict[str, str]],
+) -> str:
+    audit_at = audit.parse_time(request["audit_at"])
+    candidate_ids = aliases.get(audit.normalized(request.get("email", "")), set())
+    user_id = next(iter(candidate_ids)) if len(candidate_ids) == 1 else ""
+    identifiers = (
+        audit.subject_identifiers(
+            user_id,
+            request.get("email", ""),
+            audit_at,
+            users[user_id],
+            history,
+        )
+        if user_id and audit_at
+        else set()
+    )
+    same_resource = [record for record in evidence if record.resource_id == step["resource_id"]]
+    in_scope = [
+        record
+        for record in same_resource
+        if audit_at
+        and audit.evidence_at_cutoff(record, audit_at, manifest_times)
+    ]
+    same_system = [record for record in in_scope if record.system_id == step["system_id"]]
+    linked = [
+        record
+        for record in same_system
+        if user_id and audit.evidence_matches(record, user_id, identifiers)
+    ]
+    activity_refs = [
+        item
+        for item in activities
+        if item.get("resource_id") == step["resource_id"]
+        and item.get("target_system") == step["system_id"]
+        and audit.parse_time(item.get("event_time")) is not None
+        and audit_at
+        and audit.parse_time(item["event_time"]) <= audit_at
+    ]
+
+    if linked:
+        return "matching participant evidence exists at audit_at; the planner omitted the required step"
+    if same_system:
+        refs = ", ".join(
+            f"{record.evidence_id} ({record.category}/{record.status})"
+            for record in same_system
+        )
+        return f"resource is parsed at audit_at ({refs}) but not linked to the resolved subject"
+    if in_scope:
+        refs = ", ".join(
+            f"{record.evidence_id} as {record.system_id}" for record in in_scope
+        )
+        return f"resource is parsed at audit_at under another system ({refs})"
+    if same_resource:
+        refs = ", ".join(record.evidence_id for record in same_resource)
+        return f"resource appears only in evidence excluded by audit_at ({refs})"
+    if activity_refs:
+        refs = ", ".join(
+            f"{item['activity_id']} ({item['event_type']}/{item.get('reported_result', '')})"
+            for item in activity_refs
+        )
+        return f"activity target exists ({refs}), but activity alone does not prove record state or subject linkage"
+    return "resource could not be located in parsed participant evidence or eligible activity"
+
+
 def write_differential(
     expected: list[dict[str, str]],
     actual: list[dict[str, str]],
     path: Path,
     parsed_resource_ids: set[str],
+    requests: list[dict[str, str]],
+    evidence: list[audit.Evidence],
+    manifest_times: dict[str, str],
+    activities: list[dict[str, str]],
+    users: dict[str, dict[str, Any]],
+    aliases: dict[str, set[str]],
+    history: list[dict[str, str]],
 ) -> None:
     expected_by_id = {row["case_id"]: row for row in expected}
     actual_by_id = {row["case_id"]: row for row in actual}
+    request_by_id = {row["case_id"]: row for row in requests}
     lines = [
         "# Public Sample Differential",
         "",
@@ -298,6 +378,22 @@ def write_differential(
                     f"- Expected step {expected_index + 1}: expected "
                     f"`{render_step(expected_step)}`; actual `<no matching system/resource step>`."
                 )
+                request = request_by_id.get(case_id)
+                if request:
+                    lines.append(
+                        "  Source trace: "
+                        + missing_step_source(
+                            expected_step,
+                            request,
+                            evidence,
+                            manifest_times,
+                            activities,
+                            users,
+                            aliases,
+                            history,
+                        )
+                        + "."
+                    )
         for actual_index in sorted(unmatched_actual):
             root_causes.add("extra steps")
             lines.append(
@@ -373,14 +469,25 @@ def main() -> int:
         actual_samples = read_rows(sample_actual_path)
         metrics = score_samples(expected_samples, actual_samples)
         if args.differential_report:
-            parsed_resource_ids = {
-                record.resource_id for record in audit.load_evidence(args.dataset)
+            parsed_evidence = audit.load_evidence(args.dataset)
+            parsed_resource_ids = {record.resource_id for record in parsed_evidence}
+            manifest_times = {
+                row["file_id"]: row["captured_at"]
+                for row in read_rows(args.dataset / "evidence_files.csv")
             }
+            users, aliases = audit.identity_index(args.dataset)
             write_differential(
                 expected_samples,
                 actual_samples,
                 args.differential_report,
                 parsed_resource_ids,
+                requests=read_rows(sample_requests),
+                evidence=parsed_evidence,
+                manifest_times=manifest_times,
+                activities=read_rows(args.dataset / "system_activity.csv"),
+                users=users,
+                aliases=aliases,
+                history=read_rows(args.dataset / "user_audit_log.csv"),
             )
             print(f"Detailed differential report: {args.differential_report}")
     count = metrics["cases"]

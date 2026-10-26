@@ -532,15 +532,15 @@ def parse_text_file(path: Path, evidence_id: str, captured_at: str) -> list[Evid
 
 def optional_image_text(path: Path) -> str:
     executable = shutil.which("tesseract")
-    if not executable:
-        return ""
-    result = subprocess.run(
-        [executable, str(path), "stdout"],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    if executable:
+        command = [executable, str(path), "stdout"]
+    else:
+        swift = shutil.which("swift") if sys.platform == "darwin" else None
+        vision_script = Path(__file__).with_name("vision_ocr.swift")
+        if not swift or not vision_script.is_file():
+            return ""
+        command = [swift, str(vision_script), str(path)]
+    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
         raise RuntimeError(f"OCR failed for {path}: {result.stderr.strip()}")
     return result.stdout
@@ -552,16 +552,33 @@ def document_evidence(
     if not text.strip():
         return []
     category_hint = path.stem.replace("_", " ")
-    matches = re.findall(r"\b(?:account|search|analytics|support|export|backup|data_flow|tombstone|audit_record)_\d+\b", text, re.I)
+    resource_pattern = (
+        r"\b(account|search|analytics|support|export|backup|data[\s_-]*flow|"
+        r"tombstone|audit[\s_-]*record|cache|marketing|email[\s_-]*delivery)"
+        r"[\s_-]+(\d+)\b"
+    )
+    matches = re.findall(resource_pattern, text, re.I)
     if not matches:
         return []
     output: list[Evidence] = []
-    unique_ids = list(dict.fromkeys(matches))
+    unique_ids: list[str] = []
+    for prefix, number in matches:
+        normalized_prefix = re.sub(r"[\s-]+", "_", prefix).casefold()
+        resource_id = f"{normalized_prefix}_{number}"
+        if resource_id not in unique_ids:
+            unique_ids.append(resource_id)
+    emails = set(re.findall(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", text))
+    subject_ids = {
+        f"user_{number}"
+        for number in re.findall(r"(?i)\buser[\s_-]+(\d+)\b", text)
+    }
+    subject_reference = next(iter(subject_ids)) if len(subject_ids) == 1 else ""
     for resource_id in unique_ids:
         fields = {"resource_id": resource_id, "document_text": text}
-        emails = re.findall(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", text)
-        if emails:
-            fields["email"] = emails[0]
+        if len(emails) == 1:
+            fields["email"] = next(iter(emails))
+        if subject_reference:
+            fields["subject_reference"] = subject_reference
         category = canonical_category("", category_hint, fields)
         system = {
             "ACCOUNT_TOMBSTONE": "identity_service",
@@ -569,6 +586,9 @@ def document_evidence(
             "BACKUP_ARCHIVE": "backup_service",
             "DATA_FLOW": "integration_service",
             "USER_EXPORT": "export_service",
+            "MARKETING_PROFILE": "marketing_platform",
+            "EMAIL_DELIVERY_LOG": "email_delivery_service",
+            "CACHE_ENTRY": "cache_service",
             "ANALYTICS_PROFILE": "analytics_platform",
             "SEARCH_INDEX_ENTRY": "search_service",
             "SUPPORT_ATTACHMENT": "support_platform",
@@ -1037,7 +1057,6 @@ def build_case(
     account_records = [record for record in matching if record.category == "USER_PROFILE"]
     account_id = next((record.resource_id for record in account_records), "")
     if not account_records:
-        reported_at = parse_time(request.get("reported_at"))
         linked_activities: list[tuple[float, str]] = []
         for activity in activities:
             if (
@@ -1051,14 +1070,21 @@ def build_case(
             if event_time is None or event_time > audit_at or not resource_id.startswith("account_"):
                 continue
             details = normalized(activity.get("details", ""))
-            if normalized(user_id) in details or any(
-                "@" in value and normalized(value) in details for value in identifiers
+            linked_identifiers = [normalized(user_id)] + [
+                normalized(value) for value in identifiers if "@" in value
+            ]
+            if any(
+                re.search(
+                    (
+                        rf"(?<![\w.+-]){re.escape(identifier)}(?![\w.+-])"
+                        if "@" in identifier
+                        else rf"(?<!\w){re.escape(identifier)}(?!\w)"
+                    ),
+                    details,
+                )
+                for identifier in linked_identifiers
             ):
                 linked_activities.append((0.0, resource_id))
-            elif reported_at:
-                distance = abs((event_time - reported_at).total_seconds())
-                if distance <= 600:
-                    linked_activities.append((distance, resource_id))
         unique_resources = {resource_id for _, resource_id in linked_activities}
         if len(unique_resources) == 1:
             account_id = next(iter(unique_resources))
@@ -1162,7 +1188,7 @@ def build_case(
                 verified_resources.add(key)
         for record in account_evidence:
             key = (record.system_id, record.resource_id)
-            if not account_present and key not in verified_resources:
+            if evidence_state(record) == "ABSENT" and key not in verified_resources:
                 steps.append(
                     step("VERIFICATION", record.system_id, record.resource_id, "VERIFY_RECORD_ABSENT", "ABSENT", "")
                 )
@@ -1242,8 +1268,16 @@ def main() -> int:
     output_path = args.output.resolve()
     row_count = run(dataset, input_path, output_path)
     print(f"Wrote {row_count} audit rows to {output_path}")
-    if shutil.which("tesseract") is None and any((dataset / "evidence").rglob("*.png")):
-        print("Note: tesseract is unavailable; image evidence was not OCR-scanned.", file=sys.stderr)
+    if (
+        shutil.which("tesseract") is None
+        and (
+            sys.platform != "darwin"
+            or shutil.which("swift") is None
+            or not Path(__file__).with_name("vision_ocr.swift").is_file()
+        )
+        and any((dataset / "evidence").rglob("*.png"))
+    ):
+        print("Note: Tesseract and macOS Vision OCR are unavailable; image evidence was not scanned.", file=sys.stderr)
     return 0
 
 

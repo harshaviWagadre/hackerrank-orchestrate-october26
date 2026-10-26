@@ -41,7 +41,7 @@ The blank template at `dataset/output.csv` is provided as a reference. Your fina
 
 ### Current implementation
 
-The implementation in `code/main.py` is a deterministic, standard-library Python pipeline. It reads the participant-facing identity history, activity, policy, evidence manifest, and evidence files, applies each request's `audit_at` cutoff, and writes root-level `output.csv`. Supported evidence readers include JSON, SQLite-compatible SQL, structured and key-value logs, text, and extractable PDF text. Image evidence is not OCR-scanned when Tesseract is unavailable.
+The implementation in `code/main.py` is a deterministic Python pipeline. It reads the participant-facing identity history, activity, policy, evidence manifest, and evidence files, applies each request's `audit_at` cutoff, and writes root-level `output.csv`. Supported evidence readers include JSON, SQLite-compatible SQL, structured and key-value logs, text, and extractable PDF text. PNG screenshots are OCR-scanned with Tesseract when installed; on macOS, the pipeline falls back to Apple's Vision framework using the included `code/vision_ocr.swift`. On other platforms without Tesseract, PNG evidence is skipped.
 
 From the repository root:
 

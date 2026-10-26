@@ -10,6 +10,7 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `COMPLETE`, actual `COMPLETE`.
 - Step count: expected 3, actual 2.
 - Expected step 3: expected `VERIFICATION analytics_platform/analytics_9406 VERIFY_RECORD_ANONYMIZED=ANONYMIZED evidence='evidence_94'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_94 (ANALYTICS_PROFILE/ANONYMIZED), evidence_94 (ANALYTICS_PROFILE/ANONYMIZED)) but not linked to the resolved subject.
 - Diagnostic categories: evidence extraction/linkage, missing steps.
 
 
@@ -18,7 +19,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `COMPLETE`, actual `INCOMPLETE`.
 - Step count: expected 2, actual 0.
 - Expected step 1: expected `VERIFICATION account_service/account_004 VERIFY_RECORD_ABSENT=ABSENT evidence='evidence_54'`; actual `<no matching system/resource step>`.
+  Source trace: resource could not be located in parsed participant evidence or eligible activity.
 - Expected step 2: expected `VERIFICATION analytics_platform/analytics_901 VERIFY_RECORD_ANONYMIZED=ANONYMIZED evidence='evidence_56'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_56 (ANALYTICS_PROFILE/ANONYMIZED)) but not linked to the resolved subject.
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps.
 
 
@@ -27,7 +30,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `INCOMPLETE`, actual `INCOMPLETE`.
 - Step count: expected 5, actual 3.
 - Expected step 3: expected `VERIFICATION account_service/account_3960 VERIFY_RECORD_ABSENT=ABSENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: resource appears only in evidence excluded by audit_at (evidence_06).
 - Expected step 4: expected `VERIFICATION security_service/audit_record_4902 VERIFY_RECORD_PRESENT=PRESENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: resource appears only in evidence excluded by audit_at (evidence_06).
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps, retained records.
 
 
@@ -36,7 +41,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `INCOMPLETE`, actual `INCOMPLETE`.
 - Step count: expected 14, actual 12.
 - Expected step 9: expected `VERIFICATION account_service/account_5521 VERIFY_RECORD_ABSENT=ABSENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: activity target exists (activity_3732 (DELETE_RECORD/SUCCESS)), but activity alone does not prove record state or subject linkage.
 - Expected step 11: expected `VERIFICATION security_service/audit_record_6645 VERIFY_RECORD_PRESENT=PRESENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: resource could not be located in parsed participant evidence or eligible activity.
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps, retained records.
 
 
@@ -45,7 +52,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `INCOMPLETE`, actual `INCOMPLETE`.
 - Step count: expected 8, actual 6.
 - Expected step 5: expected `VERIFICATION account_service/account_5037 VERIFY_RECORD_ABSENT=ABSENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: activity target exists (activity_3734 (DELETE_RECORD/FAILED)), but activity alone does not prove record state or subject linkage.
 - Expected step 7: expected `VERIFICATION security_service/audit_record_5569 VERIFY_RECORD_PRESENT=PRESENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: resource could not be located in parsed participant evidence or eligible activity.
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps, retained records.
 
 
@@ -54,7 +63,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `COMPLETE`, actual `COMPLETE`.
 - Step count: expected 3, actual 1.
 - Expected step 1: expected `VERIFICATION account_service/account_6440 VERIFY_RECORD_ABSENT=ABSENT evidence='evidence_92'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_92 (USER_PROFILE/ABSENT)) but not linked to the resolved subject.
 - Expected step 3: expected `VERIFICATION analytics_platform/analytics_5335 VERIFY_RECORD_ANONYMIZED=ANONYMIZED evidence='evidence_92'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_92 (ANALYTICS_PROFILE/ANONYMIZED)) but not linked to the resolved subject.
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps.
 
 
@@ -63,6 +74,7 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `INCOMPLETE`, actual `INCOMPLETE`.
 - Step count: expected 8, actual 7.
 - Expected step 5: expected `VERIFICATION account_service/account_4990 VERIFY_RECORD_ABSENT=ABSENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: activity target exists (activity_3573 (DELETE_RECORD/SUCCESS)), but activity alone does not prove record state or subject linkage.
 - Diagnostic categories: identity resolution / account evidence linkage, missing steps.
 
 
@@ -71,7 +83,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `INCOMPLETE`, actual `INCOMPLETE`.
 - Step count: expected 8, actual 6.
 - Expected step 5: expected `VERIFICATION account_service/account_410 VERIFY_RECORD_ABSENT=ABSENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: activity target exists (activity_3662 (DELETE_RECORD/FAILED)), but activity alone does not prove record state or subject linkage.
 - Expected step 8: expected `VERIFICATION security_service/audit_record_4128 VERIFY_RECORD_PRESENT=PRESENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: resource appears only in evidence excluded by audit_at (evidence_02).
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps, retained records.
 
 
@@ -80,6 +94,7 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `INCOMPLETE`, actual `INCOMPLETE`.
 - Step count: expected 7, actual 6.
 - Expected step 7: expected `VERIFICATION security_service/audit_record_7095 VERIFY_RECORD_PRESENT=PRESENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: resource appears only in evidence excluded by audit_at (evidence_02).
 - Diagnostic categories: evidence extraction/linkage, missing steps, retained records.
 
 
@@ -88,7 +103,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `COMPLETE`, actual `COMPLETE`.
 - Step count: expected 3, actual 1.
 - Expected step 1: expected `VERIFICATION account_service/account_3136 VERIFY_RECORD_ABSENT=ABSENT evidence='evidence_92'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_92 (USER_PROFILE/ABSENT)) but not linked to the resolved subject.
 - Expected step 3: expected `VERIFICATION analytics_platform/analytics_1895 VERIFY_RECORD_ANONYMIZED=ANONYMIZED evidence='evidence_92'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_92 (ANALYTICS_PROFILE/ANONYMIZED)) but not linked to the resolved subject.
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps.
 
 
@@ -97,7 +114,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `COMPLETE`, actual `COMPLETE`.
 - Step count: expected 6, actual 4.
 - Expected step 1: expected `VERIFICATION account_service/account_5684 VERIFY_RECORD_ABSENT=ABSENT evidence='evidence_92'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_92 (USER_PROFILE/ABSENT)) but not linked to the resolved subject.
 - Expected step 4: expected `VERIFICATION analytics_platform/analytics_4566 VERIFY_RECORD_ANONYMIZED=ANONYMIZED evidence='evidence_92'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_92 (ANALYTICS_PROFILE/ANONYMIZED)) but not linked to the resolved subject.
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps.
 
 
@@ -106,7 +125,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `COMPLETE`, actual `COMPLETE`.
 - Step count: expected 6, actual 4.
 - Expected step 1: expected `VERIFICATION account_service/account_3866 VERIFY_RECORD_ABSENT=ABSENT evidence='evidence_92'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_92 (USER_PROFILE/ABSENT)) but not linked to the resolved subject.
 - Expected step 4: expected `VERIFICATION analytics_platform/analytics_4574 VERIFY_RECORD_ANONYMIZED=ANONYMIZED evidence='evidence_92'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_92 (ANALYTICS_PROFILE/ANONYMIZED)) but not linked to the resolved subject.
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps.
 
 
@@ -115,7 +136,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `COMPLETE`, actual `COMPLETE`.
 - Step count: expected 6, actual 4.
 - Expected step 1: expected `VERIFICATION account_service/account_5482 VERIFY_RECORD_ABSENT=ABSENT evidence='evidence_92'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_92 (USER_PROFILE/ABSENT)) but not linked to the resolved subject.
 - Expected step 4: expected `VERIFICATION analytics_platform/analytics_6077 VERIFY_RECORD_ANONYMIZED=ANONYMIZED evidence='evidence_92'`; actual `<no matching system/resource step>`.
+  Source trace: resource is parsed at audit_at (evidence_92 (ANALYTICS_PROFILE/ANONYMIZED)) but not linked to the resolved subject.
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps.
 
 
@@ -124,7 +147,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `INCOMPLETE`, actual `INCOMPLETE`.
 - Step count: expected 14, actual 12.
 - Expected step 9: expected `VERIFICATION account_service/account_7012 VERIFY_RECORD_ABSENT=ABSENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: activity target exists (activity_3532 (DELETE_RECORD/FAILED)), but activity alone does not prove record state or subject linkage.
 - Expected step 11: expected `VERIFICATION security_service/audit_record_3954 VERIFY_RECORD_PRESENT=PRESENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: resource appears only in evidence excluded by audit_at (evidence_02).
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps, retained records.
 
 
@@ -133,7 +158,9 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `INCOMPLETE`, actual `INCOMPLETE`.
 - Step count: expected 14, actual 12.
 - Expected step 9: expected `VERIFICATION account_service/account_4163 VERIFY_RECORD_ABSENT=ABSENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: activity target exists (activity_3465 (DELETE_RECORD/SUCCESS)), but activity alone does not prove record state or subject linkage.
 - Expected step 11: expected `VERIFICATION security_service/audit_record_1707 VERIFY_RECORD_PRESENT=PRESENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: resource appears only in evidence excluded by audit_at (evidence_02).
 - Diagnostic categories: evidence extraction/linkage, identity resolution / account evidence linkage, missing steps, retained records.
 
 
@@ -142,6 +169,7 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `COMPLETE`, actual `COMPLETE`.
 - Step count: expected 3, actual 2.
 - Expected step 1: expected `VERIFICATION account_service/account_4857 VERIFY_RECORD_ABSENT=ABSENT evidence='evidence_51'`; actual `<no matching system/resource step>`.
+  Source trace: activity target exists (activity_3682 (DELETE_RECORD/SUCCESS)), but activity alone does not prove record state or subject linkage.
 - Diagnostic categories: identity resolution / account evidence linkage, missing steps.
 
 
@@ -150,6 +178,7 @@ underlying participant evidence is sufficient to resolve every mismatch.
 - Status: expected `INCOMPLETE`, actual `INCOMPLETE`.
 - Step count: expected 5, actual 4.
 - Expected step 3: expected `VERIFICATION account_service/account_8858 VERIFY_RECORD_ABSENT=ABSENT evidence=''`; actual `<no matching system/resource step>`.
+  Source trace: activity target exists (activity_3685 (DELETE_RECORD/PARTIAL)), but activity alone does not prove record state or subject linkage.
 - Diagnostic categories: identity resolution / account evidence linkage, missing steps.
 
 
